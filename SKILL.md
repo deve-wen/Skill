@@ -1,15 +1,20 @@
 ---
 name: mt5-ea-common-trading-module
-description: 'Generate a reusable MQL5 common trading module (v4.17) for MetaTrader 5 Expert Advisors. Use when developing any MT5 EA strategy (e.g., EMA55MA233SuperTrend engulfing, or any future) and wants to inherit the common trading panels — Beijing trading hours, position/lot sizing, independent SL/TP switches, risk-reward ratio, same-bar no-reentry, max-stop-loss, max concurrent positions, 3-stage scaling-out (1×/2×/3× SL-space profit), fixed SL/TP, triple trailing-stop modes (A progressive + B one-shot break-even + C pattern-based, mutex), risk control (daily loss + spread limit), and consecutive-loss pause. Trailing runs unconditionally in OnTick, triggers on raw Bid/Ask differential, preserves TP via read-back, treats (currentSL==0) as forced-move, logs retcode on modify failure, and ships a persistent-trail-slot helper (capacity 100, auto-prune, ring-allocation, stage-tracking). v4.17: Trailing-C gates Phase-2 behind Phase-1 (no SL move until TriggerPts profit; BUG #6 uses only bars since open).'
+description: 'Generate a reusable MQL5 common trading module (v4.20) for MT5 EAs and deploy the EA into <terminal data>\MQL5\Experts\ so F5 debugging works. Use for any MT5 EA strategy needing: Beijing trading hours, lot sizing, SL/TP switches, risk-reward ratio, same-bar no-reentry, max-stop-loss, max concurrent positions (magic-filtered), 3-stage scaling-out, 3 trailing modes (A progressive / B one-shot break-even / C pattern swing, mutex), daily net-loss cap, consecutive-loss pause, min-hold-time gate, end-of-session close-all. Trailing uses raw Bid/Ask differential, preserves TP on modify, treats currentSL==0 as forced-move, persistent trail slots (#define TRAIL_SLOT_COUNT 100). v4.20 rewrites daily-loss and consecutive-loss tracking as an idempotent per-position (DEAL_POSITION_ID) recompute: wins offset losses before the 5% cap, and scaling-out no longer resets the loss streak; pause persists via GlobalVariable. Deployment guide included: EAs outside MQL5\Experts\ compile with F7 but silently fail on F5.'
 ---
 
-# MT5 EA 通用交易模块 v4.17
+# MT5 EA 通用交易模块 Skill v4.20（模块 v4.20）
+
+> **版本口径**：Skill 与模块同版本 `v4.20`（本次模块代码有实质修改：重写日亏损与连续亏损统计）。
+> v4.19 只改文档与部署工具，模块停留 v4.18；v4.20 起两者对齐。
 
 ## Overview
 
-This skill packages the v4.17 standard trading-management panels shown in the MT5 EA input dialog — including **three independent trailing-stop modes (A progressive / B one-shot break-even / C pattern-based)**, **independent SL/TP switches**, **adjustable risk-reward ratio**, **same-bar no-reentry guard**, **max-stop-loss limit**, **max concurrent positions**, **3-stage scaling-out**, **end-of-day close-all**, and **consecutive-loss pause** — into a single reusable MQL5 module.
+This skill packages the v4.20 standard trading-management panels shown in the MT5 EA input dialog — including **three independent trailing-stop modes (A progressive / B one-shot break-even / C pattern-based)**, **independent SL/TP switches**, **adjustable risk-reward ratio**, **same-bar no-reentry guard**, **max-stop-loss limit**, **max concurrent positions**, **3-stage scaling-out**, **end-of-day close-all**, and **consecutive-loss pause** — into a single reusable MQL5 module.
 
-When the user asks to develop any MT5 EA strategy and wants those common panels to be included automatically, generate the common module and an example EA template, then explain how to integrate it.
+When the user asks to develop any MT5 EA strategy and wants those common panels to be included automatically, generate the common module and an example EA template, explain how to integrate it, and **deploy the resulting EA into the MT5 terminal data directory** so that F5 debugging works.
+
+> ⚠️ **F5 前置条件**：EA 必须位于 `<终端数据目录>\MQL5\Experts\` 才能被 MetaEditor 调试器（`metatester64.exe`）定位。只放在外部项目目录时 **F7 能编译、F5 静默失败**。详见第 17 节与 `references/deployment.md`。
 
 ## Triggering phrases
 
@@ -21,7 +26,12 @@ When the user asks to develop any MT5 EA strategy and wants those common panels 
 - "同一根K线不能重复开仓" / "刚平仓不允许再开仓"
 - "通用交易模块"
 - "EA 仓位/止损/风控"
-- "v4.17 参数面板"
+- "v4.18 参数面板" / "v4.20 参数面板"
+- "按 F5 没反应" / "F5 调试失败" / "能编译不能调试"
+- "EA 部署到 MT5" / "装到 Experts 目录" / "终端数据目录"
+- "metaeditor.log 里没有 MQL5 debugger"
+- "连续亏损3笔没暂停" / "连亏暂停不生效" / "暂停90分钟没触发"
+- "日亏损5%没停止" / "当日最大亏损不生效" / "净亏损"
 
 ## Workflow
 
@@ -30,8 +40,13 @@ When the user asks to develop any MT5 EA strategy and wants those common panels 
 3. **Emit example EA** (optional): Copy `Example_EA_Template.mq5` and replace the placeholder `CheckEntrySignal()` with the user's actual strategy.
 4. **Reference parameters**: If the user asks about specific inputs, load `parameters.md`.
 5. **Integration instructions**: Tell the user how to `#include` the module, instantiate the class, and wire `OnTick`, `OnTrade`, `OnTimer`, and `OnInit`.
+6. **★ Deploy into the MT5 terminal data directory**（**必做，否则用户无法 F5 调试**）:
+   - Run `scripts/deploy_to_terminal.py` to place the `.mq5` into `<terminal data>\MQL5\Experts\` and the `.mqh` into `<terminal data>\MQL5\Include\` (all detected terminals).
+   - **Never deliver an EA that only lives in an external project folder** (e.g. `F:\...\EA系列\`) — F7 will compile it, but **F5 will fail silently** with no error and no message.
+   - Tell the user the correct launch path: open the MT5 terminal → press **F4** (do **not** double-click the `.mq5` in Explorer).
+   - Full rationale, verification checklist and troubleshooting: load `references/deployment.md`.
 
-## v4.17 input panel structure
+## v4.20 input panel structure
 
 The module presents this control panel in MT5:
 
@@ -116,6 +131,10 @@ The module presents this control panel in MT5:
    最小持仓分钟数: 未满此时长不启用追踪        20
 ```
 
+> ⚠️ **两个容易被忽略的默认值**：
+> - `启用连续亏损暂停` 默认 **`false`** —— 不勾选就完全不会暂停。启动日志会打印 `连续亏损暂停 已启用 / *** 未启用 ***`，先看这一行。
+> - `启用当日最大亏损限制` 默认 `true`，阈值 5.0；口径是**当日已实现净盈亏**（盈利抵扣亏损），分母为**当日起始余额**。
+
 ## Core capabilities
 
 ### 1. 交易时间（北京时间）
@@ -163,14 +182,33 @@ The module presents this control panel in MT5:
 - If multiple are ticked simultaneously, `Init()` counts and prints a warning, **priority A > B > C** wins.
 - `IsTrailingAEnabled()` / `IsTrailingBEnabled()` / `IsTrailingCEnabled()` implement the mutex logic.
 
-### 9. 风控管理
-- Daily loss limit: stops trading when losses reach `InpDailyLossPercent` of balance.
-- Spread limit: blocks entries when spread exceeds `InpMaxSpreadPoints`.
-- Both are checked in `IsTradingAllowed()`.
+### 9. 风控管理（v4.20 重写：当日**净**亏损口径）
+- **当日最大亏损**：`当日已实现净盈亏 = Σ(profit + swap + commission)`（账户级，含所有 EA 与手动单，即"当日所有交易之和"）。
+  `净亏损 = max(0, -净盈亏)`；当 `净亏损 ≥ 起日余额 × InpDailyLossPercent%` 时，当日**禁止开新仓**。
+  - **盈利抵扣亏损**：+800 与 -300 并存 → 净 +500 → 不触发（旧版会累加成"毛亏 300"而误判）。
+  - **阈值分母固定**为当日起始余额 `m_dayStartBalance`，不随亏损扩大而缩小。
+  - **重启不丢**：每次检查都从当日历史幂等重算，EA 重启/改参数后当日已亏 5% 依然拦住。
+  - 实现：`RefreshDayStats()`（节流 `STATS_RECALC_SECONDS`=2 秒）+ `CheckDailyLossLimit()`。
+- **点差限制**：`spread > InpMaxSpreadPoints` 时禁止开仓。
+- 两者都在 `IsTradingAllowed()` 中检查，`OpenPosition()` 每次开仓都会重新校验。
 
-### 10. 连续亏损暂停
-- Counts consecutive losses in `OnTrade()`.
-- Pauses new entries for `InpPauseMinutes` after `InpConsecutiveLossCount` consecutive losses.
+### 10. 连续亏损暂停（v4.20 重写：按**持仓**判盈亏，不再被分批止盈破解）
+- 触发条件：**本 EA**（按 `DEAL_MAGIC` 过滤）连续 `InpConsecutiveLossCount` 笔交易净亏损 → 暂停 `InpPauseMinutes` 分钟禁止开新仓。
+- **旧实现三个漏（已修）**：
+  1. 只靠 `OnTrade()` 增量 + 函数内 `static` 票号游标 —— EA 未接线或事件被 1 秒节流吞掉就完全不计数；
+  2. **按单笔 deal 判盈亏** —— 分批止盈的盈利档位（`net>0`）会把连亏计数清零，真实亏损被抵消，**连亏永远凑不齐 N 笔**；
+  3. `m_pauseUntil` 只在内存，EA 重启即丢。
+- **现实现**：以 `DEAL_POSITION_ID` 为"一次交易"归组求和 → 一次交易里 3 档平仓 (+200/+400/−900) 判为 1 笔亏损 −300（旧版判成 0 笔亏损）。
+- **统计来源**：`RefreshDayStats()` 从当日历史幂等重算，每 2 秒节流；`IsTradingAllowed()` / `OnTrade()` / `OnTimer()` 三处都会触发，**不依赖 EA 是否接了 `OnTrade()`**。
+- **暂停持久化**：`GlobalVariable` 名 `CTM_PAUSE_<magic>`（到期时间）+ `CTM_LOSSRESET_<magic>`（连亏统计起点），重启后暂停不丢、也不会把已翻篇的旧连亏重算一遍。
+- **暂停到期后**：`m_lossCountResetAt = now` → 只统计此刻起的交易，不会一到期就立刻再次触发。
+- 日志：
+  ```
+  CommonModule: 连续亏损暂停 已启用（连亏 3 笔 → 暂停 90 分钟）
+  CommonModule: 【连续亏损暂停】已连亏 3 笔（阈值 3）→ 暂停 90 分钟，至 2026.10.17 13:05 前禁止开新仓
+  ```
+- ⚠️ **`InpUseConsecutiveLossPause` 默认值为 `false`**：必须在参数面板勾选。`Init()` 会打印 `连续亏损暂停 已启用 / *** 未启用 ***`，启动后先看这一行。
+
 
 ### 11. 盈亏比设置（可调）
 - `InpUseRiskRewardRatio=true` → TP 点数自动 = SL 点数 × `InpRiskRewardRatio`（2:1 / 3:1 / 5:1 任意可调）。
@@ -257,6 +295,96 @@ The module presents this control panel in MT5:
   [ScalingOut.Stage1] OK ticket=X closeLots=0.33 remaining=0.67 profit=300.0pts trigger=1.00xSL=300.0pts nextStage=1
   ```
 
+### 16. 编译期约束与 EA 侧集成（v4.18 / v4.20 补充）
+
+**容量常量必须用 `#define`，不能用类内 `static const`**：
+
+```cpp
+#ifndef TRAIL_SLOT_COUNT
+#define TRAIL_SLOT_COUNT 100
+#endif
+```
+
+MQL5 中类内 `static const int` 不是编译期常量 → 作数组成员数组维度会报 `constant expression required`。
+模块已用 `#ifndef` 保护，EA 侧**不必再定义**该宏（若定义请放在 `#include` 之前，或直接删除）。
+
+**成员数组与成员变量必须成套声明**：`m_trailTickets[]` / `m_trailSlotUsed[]` / `m_trailStage[]`
+三者共同构成持久化追踪槽位（容量 `TRAIL_SLOT_COUNT`）。缺少 `m_trailStage[]` 会报 `error 256: undeclared identifier`
+并连带 6 处引用全部失败。
+
+**EA 侧自有分批止盈必须回传通知**（否则双仓永远锁死）：
+
+```cpp
+// 模块内分批止盈：无需处理，自动置位
+// EA 侧分批止盈：第 1 档平仓成功后调用
+g_Common.NotifyTier1Triggered();
+bool st = g_Common.IsTier1Triggered();   // 查询状态
+```
+
+原理：`effectiveMaxPos = m_anyTier1Triggered ? InpMaxPositions : 1`。
+`m_anyTier1Triggered` 只在模块内 `ApplyScalingOut()` 第 1 档触发时置位；
+EA 侧实现分批时若不回传，该位恒为 `false` → `effectiveMaxPos` 恒为 `1` → 永远开不出第 2 仓。
+`OpenPosition()` 成功后会立即清零该位（金刚经 v1.20：每个新仓独立证明）。
+
+**静态自检工具**：`scripts/check_mqh.py` ——
+无 MetaEditor 环境下对 `.mqh` 做编译前体检（input 声明/成员数组维度/括号配对/声明-定义配对）：
+
+```bash
+python scripts/check_mqh.py MT5_EA_Common_Trading_Module.mqh
+```
+
+### 17. 部署与调试（F5 前置条件，v4.19 新增）
+
+**问题**：MetaEditor 的调试（F5）由 `metatester64.exe` 完成，它**只会在 MT5 终端自己的数据目录里定位 EA**：
+
+```
+<终端数据目录>\MQL5\Experts\<EA名称>.mq5
+```
+
+源码放在外部项目目录（如 `F:\...\EA系列\`）时：
+
+| 动作 | 结果 |
+|---|---|
+| **F7** 编译 | ✅ 成功（编译不依赖终端数据目录） |
+| **F5** 调试 | ❌ **静默失败**——不报错、不提示、进程直接退出 |
+
+**判定铁证（`...\Terminal\<哈希>\logs\metaeditor.log`，UTF-16LE）**：
+
+- 调试成功 → 出现 **`MQL5 debugger`** 行
+- 静默失败 → **只有 `Compile` 行，从不出现 `MQL5 debugger`**
+- 辅助判据 → F5 会产出含调试信息的 `.ex5`，体积约 **1.6~1.8 倍**（如 107 KB → 177 KB）；体积没变大 = 没进调试器
+
+**目录布局与 `#include` 写法对照（务必匹配）**：
+
+| 布局 | `.mq5` | `.mqh` | `#include` 写法 |
+|---|---|---|---|
+| A. 单文件合并（推荐） | `MQL5\Experts\` | 已并入 `.mq5` | 无 |
+| B. 模块走 Include | `MQL5\Experts\` | `MQL5\Include\` | `#include <MT5_EA_Common_Trading_Module.mqh>` |
+| C. 同目录共存 | `MQL5\Experts\` | `MQL5\Experts\` | `#include "MT5_EA_Common_Trading_Module.mqh"` |
+
+> ⚠️ 注意目录名是 **`MQL5\Include\`（单数）**，不是 `Includes`。
+> ⚠️ 用引号 `"..."` 会优先在 `.mq5` 同目录找；`.mqh` 只在 `Include\` 时必须用尖括号 `<...>`，否则报 `cannot open source file`。
+
+**一键部署**：
+
+```bash
+# 列出本机所有终端数据目录
+python scripts/deploy_to_terminal.py --list
+
+# 部署 EA + 模块到全部终端（自动发现，SHA-256 校验）
+python scripts/deploy_to_terminal.py --expert <路径.mq5> --include <路径.mqh> --terminal all
+
+# 预演 / 拉回 .ex5 / 核查是否真的进了调试器
+python scripts/deploy_to_terminal.py --expert <路径.mq5> --dry-run
+python scripts/deploy_to_terminal.py --pull-ex5 <路径.mq5> --terminal all
+python scripts/deploy_to_terminal.py --check-log <EA名称关键字> --terminal all
+```
+
+**启动姿势（本机特有陷阱）**：`.mq5` 文件关联可能指向**另一个终端**的 `MetaEditor64.exe`——用资源管理器双击会打开"错误"的编辑器，F5 被绑定到未运行的终端，同样静默失败。
+**正确做法：打开目标 MT5 终端 → 按 F4。**
+
+**交付前验证清单**（详见 `references/deployment.md`）：源文件已落到 `MQL5\Experts\` 且哈希一致 → `.ex5` 已生成 → `metaeditor.log` 出现 `MQL5 debugger` → MT5 导航器「EA交易」下可见。
+
 ## Integration guide
 
 ### Step 1: Include the module
@@ -328,10 +456,19 @@ Open `Example_EA_Template.mq5` and replace the `CheckEntrySignal()` body with yo
 ## Resources
 
 ### MT5_EA_Common_Trading_Module.mqh
-The reusable MQL5 include file. Copy this into the user's `MQL5/Includes/` folder or project directory.
+The reusable MQL5 include file. Deploy it to **`MQL5\Include\`** (note: `Include`, **singular**) inside the MT5 terminal data directory, or merge it into the EA as a single file. The literal folder name `MQL5/Includes/` does **not** exist in MT5.
 
 ### Example_EA_Template.mq5
-A working EA skeleton that demonstrates module integration. Replace `CheckEntrySignal()` with real strategy logic.
+A working EA skeleton that demonstrates module integration. Replace `CheckEntrySignal()` with real strategy logic. Must be deployed to `MQL5\Experts\` before F5 debug will work.
+
+### references/deployment.md
+**Deployment & debug guide (v4.19)** — why F5 silently fails outside the terminal data directory, the `metaeditor.log` / `.ex5`-size evidence, the two-terminal and file-association pitfalls on this machine, the three directory layouts vs `#include` syntax, a 4-item pre-delivery checklist and a troubleshooting table.
+
+### scripts/deploy_to_terminal.py
+Auto-discovers `%APPDATA%\MetaQuotes\Terminal\*\MQL5`, copies the `.mq5` → `Experts\` and `.mqh` → `Include\` with SHA-256 verification. Modes: `--list`, `--expert/--include/--terminal`, `--dry-run`, `--pull-ex5`, `--check-log` (parses the UTF-16LE `metaeditor.log` and reports whether this EA ever reached `MQL5 debugger`).
+
+### scripts/check_mqh.py
+Pre-compile static checker for the `.mqh` (input declarations, member-array dimensions, class-scope `static const`, brace/paren balance, declaration-definition pairing).
 
 ### parameters.md
 Detailed description of every input parameter, its default value, behavior notes, and a Mode A vs B vs C comparison table.
@@ -342,11 +479,22 @@ Detailed description of every input parameter, its default value, behavior notes
 - Input defaults are taken from the user's screenshot. If the user asks to change defaults, update the `input` lines in the `.mqh` file and `parameters.md`.
 - All prices/stops are normalized to `SYMBOL_DIGITS`.
 - The module uses `CTrade` from `<Trade\Trade.mqh>` for order execution.
-- v4.17 specifically: when multiple of A/B/C are ticked, the mode with the highest priority (A > B > C) wins and a warning is logged at init. **Trailing-C phase gate**: in non-pattern-only mode, if `profitPoints < InpTrailingCTriggerPts`, the function returns early — SL never moves and Phase-2 pattern trailing never runs until the break-even lock (Phase-1) has fired. BUG #6: Phase-2 support/resistance only from bars since position open (old code included pre-open bars, freezing SL).
+- v4.18 specifically: when multiple of A/B/C are ticked, the mode with the highest priority (A > B > C) wins and a warning is logged at init. **Trailing-C phase gate**: in non-pattern-only mode, if `profitPoints < InpTrailingCTriggerPts`, the function returns early — SL never moves and Phase-2 pattern trailing never runs until the break-even lock (Phase-1) has fired. BUG #6: Phase-2 support/resistance only from bars since position open (old code included pre-open bars, freezing SL).
+- v4.20 specifically: **risk-statistics rewrite**. Daily-loss and consecutive-loss are no longer accumulated incrementally in `OnTrade()`; both are recomputed idempotently from the day's history by `RefreshDayStats()` (throttled by `STATS_RECALC_SECONDS`). Daily loss is now **net** (wins offset losses) against a fixed day-start balance. Consecutive losses are grouped by `DEAL_POSITION_ID` and filtered by magic, so scaling-out tiers can no longer reset the streak. Pause state is persisted in GlobalVariables `CTM_PAUSE_<magic>` / `CTM_LOSSRESET_<magic>`. Also fixes 3 compile errors that had never been caught (no real compile had ever been run): `CTrade::SetComment()` does not exist, `CTrade::ResultRequestDescription()` does not exist, and a comment border line missing its `//`.
+- v4.19 specifically: **no MQL5 code change** — the module stays at v4.18 so its hash in every terminal stays stable. v4.19 adds `references/deployment.md` + `scripts/deploy_to_terminal.py`, corrects the non-existent folder name `MQL5/Includes/` to `MQL5\Include\`, and makes deployment into `MQL5\Experts\` a mandatory workflow step. **Delivering an EA only to an external project folder is now considered an incomplete delivery.**
 - **CRITICAL anti-pattern #1 (TP clearing)**: when modifying SL via `PositionModify(ticket, newSL, ...)`, the third argument **MUST** be the current `POSITION_TP` value, **never** `0`. Passing `0` clears the take-profit.
 - **CRITICAL anti-pattern #2 (trailing blocked)**: `g_Common.OnTick()` must be called at the **top** of `OnTick()`, **before** `IsTradingAllowed()` checks. Otherwise break-even/trailing is skipped during off-hours / over-loss / wide-spread periods, leading to catastrophic unprotected profits.
 - **CRITICAL anti-pattern #3 (swap eats points)**: trigger trailing on raw Bid/Ask price differential, not on `POSITION_PROFIT / tickValue`. Overnight swap accumulation skews monetary profit and would prevent trailing from ever firing for held positions.
 - **CRITICAL anti-pattern #4 (asymmetric needMove)**: both BUY and SELL `needMove` checks **MUST** include an explicit `(currentSL == 0)` forced-move branch. Without it, BUY would silently skip moving when an unmanaged position has no SL yet set.
 - **CRITICAL anti-pattern #5 (10-slot trail index)**: persistent trail ticket arrays must have **capacity ≥ 100** (not 10) and **auto-prune closed positions** on every lookup. A "g_trailPersistCount++ only" pattern silently breaks trailing for the 11th and every subsequent position. Use the built-in `FindOrCreateTrailSlot` / `PruneClosedTrailSlots` helpers; never roll your own.
+- **CRITICAL anti-pattern #6 (class-scope `static const` as array dimension)**: MQL5 does **not** treat a class-scope `static const int` as a compile-time constant. Using it as an array member dimension fails with `constant expression required`. Always use a file-scope `#define` (guarded with `#ifndef`) — this is exactly the v4.18 fix for `TRAIL_SLOT_COUNT`.
+- **CRITICAL anti-pattern #7 (delivering the EA only to an external folder)**: an EA that lives only in the project directory (e.g. `F:\...\EA系列\`) compiles with **F7** but **F5 debug fails silently** — no error, no dialog. `metatester64.exe` only resolves sources under `<terminal data>\MQL5\Experts\`. Always run `scripts/deploy_to_terminal.py` before telling the user to debug, and tell them to open the terminal and press **F4** (never double-click the `.mq5`, which may launch a *different* terminal's MetaEditor and bind the debugger to a terminal that is not running).
+- **CRITICAL anti-pattern #8 (per-deal P&L judgement)**: never judge win/loss per *deal*. With scaling-out, one trade produces several `DEAL_ENTRY_OUT` deals; a profitable tier would reset the consecutive-loss streak and a per-deal sum would inflate gross loss past the daily cap. Always group deals by `DEAL_POSITION_ID` and sum `profit+swap+commission` per position.
+- **CRITICAL anti-pattern #9 (incremental risk counters)**: never keep `m_dailyLoss` / `m_consecutiveLoss` as `OnTrade()`-driven accumulators. If the EA omits `g_Common.OnTrade()`, or the event is throttled, the counters silently stay zero. Recompute from history idempotently (`RefreshDayStats()`), so the state is survivable and self-healing across restarts.
+- **CTrade API trap (v4.20)**: `CTrade` has **no** `SetComment()` and **no** `ResultRequestDescription()`. Order comments must be passed through the `comment` parameter of `PositionOpen(...)`; request info comes from `ResultComment()`. Using the nonexistent members fails with `error 256: undeclared identifier 'SetComment'`.
+- **Pair rule (v4.18)**: `m_trailTickets[]`, `m_trailSlotUsed[]` and `m_trailStage[]` form one unit — all three must be declared with the same `TRAIL_SLOT_COUNT` dimension. A missing declaration surfaces as `error 256: undeclared identifier` at every usage site (6 sites for `m_trailStage`).
+- **EA-side scaling-out handshake (v4.18)**: if the EA implements partial closes itself (i.e. `InpUseScalingOut=false`), it **must** call `g_Common.NotifyTier1Triggered()` after its tier-1 partial close succeeds. Otherwise the double-position guard `effectiveMaxPos = m_anyTier1Triggered ? InpMaxPositions : 1` stays `1` forever and the 2nd position can never open.
+- **Pre-compile static check**: run `python scripts/check_mqh.py MT5_EA_Common_Trading_Module.mqh` to catch missing declarations, illegal array dimensions, brace/paren imbalance and declaration-definition mismatches without MetaEditor.
+- **Pre-delivery deploy check (v4.19)**: run `python scripts/deploy_to_terminal.py --check-log <EA名称> --terminal all`. If it reports `本 EA 只有 Compile、没有 MQL5 debugger`, the EA has **never actually been debugged** — the fix is deploying it to `MQL5\Experts\`, **not** changing the code. Do not start hunting logic bugs in this situation.
 - **Failure logging**: every `PositionModify` goes through `SafeModifyPosition()` which prints `retcode` + context on failure. Search the journal for `PositionModify FAILED` to find all failed modify calls.
 - **Skip diagnostic logging**: every trailing mode prints a `[TrailingA.Phase2] SKIP`, `[TrailingB.OneShot] SKIP`, or `[TrailingC.Phase2] SKIP` line when the trigger conditions are met but the SL is already in the target position. Search for `SKIP ticket=` to find silent no-ops that look like dead trailing.
